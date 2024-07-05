@@ -130,10 +130,16 @@ const Output = struct {
     }
 
     fn layout_listener(layout: *river.LayoutV3, event: river.LayoutV3.Event, output: *Output) void {
+        log.debug("Received event: {s}", .{@tagName(event)});
         switch (event) {
-            .namespace_in_use => fatal("namespace 'rivercarro' already in use.", .{}),
+            .namespace_in_use => {
+                log.debug("Received namespace_in_use event", .{});
+                fatal("namespace 'rivercarro' already in use.", .{});
+            },
 
             .user_command => |ev| {
+                log.debug("Received user command event: command={s}, tags={d}", .{ ev.command, output.user_command_tags });
+                log.debug("Full user_command event: {any}", .{ev});
                 var it = mem.tokenize(u8, mem.span(ev.command), " ");
                 const active_cfg = output.get_cfg(output.user_command_tags);
                 const raw_cmd = it.next() orelse {
@@ -272,15 +278,20 @@ const Output = struct {
                 }
             },
             .user_command_tags => |ev| {
+                log.debug("Received user_command_tags event: tags={d}", .{ev.tags});
+                log.debug("Full user_command_tags event: {any}", .{ev});
                 output.user_command_tags = ev.tags;
             },
 
             .layout_demand => |ev| {
+                log.debug("Received layout_demand event: views={d}, usable_width={d}, usable_height={d}, tags={d}", .{ ev.view_count, ev.usable_width, ev.usable_height, ev.tags });
+                log.debug("Full layout_demand event: {any}", .{ev});
                 assert(ev.view_count > 0);
 
                 const active_cfg = output.get_cfg(ev.tags);
                 const main_count = @min(active_cfg.main_count, @as(u31, @truncate(ev.view_count)));
                 const sec_count = @as(u31, @truncate(ev.view_count)) -| main_count;
+                log.debug("Layout calculation: main_count={d}, sec_count={d}", .{ main_count, sec_count });
 
                 const only_one_view = ev.view_count == 1 or active_cfg.main_location == .monocle;
 
@@ -373,58 +384,61 @@ const Output = struct {
                         x += @intCast((ev.usable_width - usable_w) / 2);
                     }
 
+                    log.debug("Pushing view dimensions: x={d}, y={d}, width={d}, height={d}", .{ x, y, width, height });
                     switch (active_cfg.main_location) {
-                        .left => layout.pushViewDimensions(
-                            x +| cfg.outer_gaps,
-                            y +| cfg.outer_gaps,
-                            width,
-                            height,
-                            ev.serial,
-                        ),
-                        .right => layout.pushViewDimensions(
-                            usable_w - width -| x +| cfg.outer_gaps,
-                            y +| cfg.outer_gaps,
-                            width,
-                            height,
-                            ev.serial,
-                        ),
-                        .top => layout.pushViewDimensions(
-                            y +| cfg.outer_gaps,
-                            x +| cfg.outer_gaps,
-                            height,
-                            width,
-                            ev.serial,
-                        ),
-                        .bottom => layout.pushViewDimensions(
-                            y +| cfg.outer_gaps,
-                            usable_w - width -| x +| cfg.outer_gaps,
-                            height,
-                            width,
-                            ev.serial,
-                        ),
-                        .monocle => layout.pushViewDimensions(
-                            x +| cfg.outer_gaps,
-                            y +| cfg.outer_gaps,
-                            width,
-                            height,
-                            ev.serial,
-                        ),
+                        .left => {
+                            const final_x = x +| cfg.outer_gaps;
+                            const final_y = y +| cfg.outer_gaps;
+                            log.debug("Pushing left view: x={d}, y={d}, width={d}, height={d}, serial={d}", .{ final_x, final_y, width, height, ev.serial });
+                            layout.pushViewDimensions(final_x, final_y, width, height, ev.serial);
+                        },
+                        .right => {
+                            const final_x = usable_w - width -| x +| cfg.outer_gaps;
+                            const final_y = y +| cfg.outer_gaps;
+                            log.debug("Pushing right view: x={d}, y={d}, width={d}, height={d}, serial={d}", .{ final_x, final_y, width, height, ev.serial });
+                            layout.pushViewDimensions(final_x, final_y, width, height, ev.serial);
+                        },
+                        .top => {
+                            const final_x = y +| cfg.outer_gaps;
+                            const final_y = x +| cfg.outer_gaps;
+                            log.debug("Pushing top view: x={d}, y={d}, width={d}, height={d}, serial={d}", .{ final_x, final_y, height, width, ev.serial });
+                            layout.pushViewDimensions(final_x, final_y, height, width, ev.serial);
+                        },
+                        .bottom => {
+                            const final_x = y +| cfg.outer_gaps;
+                            const final_y = usable_w - width -| x +| cfg.outer_gaps;
+                            log.debug("Pushing bottom view: x={d}, y={d}, width={d}, height={d}, serial={d}", .{ final_x, final_y, height, width, ev.serial });
+                            layout.pushViewDimensions(final_x, final_y, height, width, ev.serial);
+                        },
+                        .monocle => {
+                            const final_x = x +| cfg.outer_gaps;
+                            const final_y = y +| cfg.outer_gaps;
+                            log.debug("Pushing monocle view: x={d}, y={d}, width={d}, height={d}, serial={d}", .{ final_x, final_y, width, height, ev.serial });
+                            layout.pushViewDimensions(final_x, final_y, width, height, ev.serial);
+                        },
                     }
+                    log.debug("Pushed view dimensions for location: {s}", .{@tagName(active_cfg.main_location)});
                 }
 
-                switch (active_cfg.main_location) {
-                    .left => layout.commit("left", ev.serial),
-                    .right => layout.commit("right", ev.serial),
-                    .top => layout.commit("top", ev.serial),
-                    .bottom => layout.commit("bottom", ev.serial),
-                    .monocle => layout.commit("monocle", ev.serial),
-                }
+                const commit_name = switch (active_cfg.main_location) {
+                    .left => "left",
+                    .right => "right",
+                    .top => "top",
+                    .bottom => "bottom",
+                    .monocle => "monocle",
+                };
+                log.debug("Committing layout: name={s}, serial={d}", .{ commit_name, ev.serial });
+                layout.commit(commit_name, ev.serial);
+                log.debug("Layout committed: location={s}, serial={d}", .{ @tagName(active_cfg.main_location), ev.serial });
             },
         }
     }
 };
 
+pub const log_level: std.log.Level = .debug;
+
 pub fn main() !void {
+    log.debug("rivercarro starting...", .{});
     const res = flags.parser([*:0]const u8, &.{
         .{ .name = "h", .kind = .boolean },
         .{ .name = "version", .kind = .boolean },
@@ -514,6 +528,8 @@ pub fn main() !void {
         try node.data.get_layout();
     }
 
+    log.debug("rivercarro initialized and ready to handle events", .{});
+
     while (true) {
         const dispatch_errno = display.dispatch();
         if (dispatch_errno != .SUCCESS) {
@@ -537,6 +553,7 @@ fn registry_event(context: *Context, registry: *wl.Registry, event: wl.Registry.
         .global => |ev| {
             if (mem.orderZ(u8, ev.interface, river.LayoutManagerV3.getInterface().name) == .eq) {
                 context.layout_manager = try registry.bind(ev.name, river.LayoutManagerV3, 2);
+                log.debug("Bound to river_layout_manager_v3", .{});
             } else if (mem.orderZ(u8, ev.interface, wl.Output.getInterface().name) == .eq) {
                 const wl_output = try registry.bind(ev.name, wl.Output, 4);
                 errdefer wl_output.release();
@@ -552,6 +569,7 @@ fn registry_event(context: *Context, registry: *wl.Registry, event: wl.Registry.
 
                 if (ctx.initialized) try node.data.get_layout();
                 context.outputs.prepend(node);
+                log.debug("New output added: name={d}", .{ev.name});
             }
         },
         .global_remove => |ev| {
@@ -563,6 +581,7 @@ fn registry_event(context: *Context, registry: *wl.Registry, event: wl.Registry.
                     node.data.cfgs.deinit(gpa);
                     context.outputs.remove(node);
                     gpa.destroy(node);
+                    log.debug("Output removed: name={d}", .{ev.name});
                     break;
                 }
             }
