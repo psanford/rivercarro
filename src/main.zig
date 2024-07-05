@@ -102,21 +102,23 @@ const Context = struct {
 var cfg: Config = .{};
 var ctx: Context = .{};
 
+var cfgs: std.AutoHashMapUnmanaged(u32, Config) = .{};
+
 const Output = struct {
     wl_output: *wl.Output,
     name: u32,
 
-    cfgs: std.AutoHashMapUnmanaged(u32, Config) = .{},
     user_command_tags: u32 = 0,
 
     layout: *river.LayoutV3 = undefined,
 
     fn get_cfg(output: *Output, tags: u32) *Config {
-        const default_cfg = output.cfgs.getPtr(0) orelse unreachable;
+        _ = output;
+        const default_cfg = cfgs.getPtr(0) orelse unreachable;
         if (!cfg.per_tag) return default_cfg;
 
         // default to global config
-        const entry = output.cfgs.getOrPutValue(gpa, tags, default_cfg.*) catch {
+        const entry = cfgs.getOrPutValue(gpa, tags, default_cfg.*) catch {
             // 0 always has a value
             log.err("out of memory, reverting to default cfg", .{});
             return default_cfg;
@@ -435,8 +437,6 @@ const Output = struct {
     }
 };
 
-pub const log_level: std.log.Level = .debug;
-
 pub fn main() !void {
     log.debug("rivercarro starting...", .{});
     const res = flags.parser([*:0]const u8, &.{
@@ -565,7 +565,7 @@ fn registry_event(context: *Context, registry: *wl.Registry, event: wl.Registry.
                     .wl_output = wl_output,
                     .name = ev.name,
                 };
-                try node.data.cfgs.put(gpa, 0, cfg);
+                try cfgs.put(gpa, 0, cfg);
 
                 if (ctx.initialized) try node.data.get_layout();
                 context.outputs.prepend(node);
@@ -578,7 +578,6 @@ fn registry_event(context: *Context, registry: *wl.Registry, event: wl.Registry.
                 if (node.data.name == ev.name) {
                     node.data.wl_output.release();
                     node.data.layout.destroy();
-                    node.data.cfgs.deinit(gpa);
                     context.outputs.remove(node);
                     gpa.destroy(node);
                     log.debug("Output removed: name={d}", .{ev.name});
